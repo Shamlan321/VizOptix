@@ -104,14 +104,19 @@ class TranslationManager(
     }
 
     private fun initializeEspDisplay() {
-        log("initializeEspDisplay() called - showing 'Translation Ready!'")
+        log("initializeEspDisplay() called - showing Python-matching welcome sequence")
+
+        // Match Python's WiFiTerminalDisplay._initialize_display()
         espServer.clear(bgColor)
         espServer.text(leftMargin, topMargin, "Translation Ready!", 1, textColor)
-        Thread.sleep(2000)
+        espServer.text(leftMargin, topMargin + 12, "25x7 Text", 1, textColor)  // Cyan color in Python
+        espServer.text(leftMargin, topMargin + 24, "WiFi Connected", 1, textColor)  // Yellow in Python
+
+        Thread.sleep(2000)  // Match Python's 2-second delay
         espServer.clear(bgColor)
         currentLine = 0
         textBuffer.clear()
-        log("initializeEspDisplay() completed")
+        log("initializeEspDisplay() completed - ESP ready for translation text")
     }
 
     private fun prepareEspForTranslation() {
