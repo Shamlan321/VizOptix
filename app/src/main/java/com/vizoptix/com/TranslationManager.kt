@@ -118,19 +118,7 @@ class TranslationManager(
         log("initializeEspDisplay() completed - ESP ready for translation text")
     }
 
-    private fun prepareEspForTranslation() {
-        log("prepareEspForTranslation() called - showing 'Translation Active!'")
-        espServer.clear(bgColor)
-        espServer.text(leftMargin, topMargin, "Translation Active!", 1, textColor)
-        espServer.text(leftMargin, topMargin + 20, "25x7 Text", 1, textColor)
-        espServer.text(leftMargin, topMargin + 40, "WiFi Connected", 1, textColor)
-        Thread.sleep(2000)
-        espServer.clear(bgColor)
-        currentLine = 0
-        textBuffer.clear()
-        log("prepareEspForTranslation() completed - screen cleared and ready for translation text")
-    }
-
+    
     private fun displayTextOnEsp(text: String) {
         log("displayTextOnEsp() called with text: '$text'")
         val wrappedLines = wrapText(text)
