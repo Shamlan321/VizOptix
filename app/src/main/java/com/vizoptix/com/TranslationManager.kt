@@ -77,8 +77,8 @@ class TranslationManager(
         
         espServer.onClientConnected = { ip ->
             log("ESP Connected: $ip")
-            initializeEspDisplay()
-            // Wait for manual trigger
+            initializeEspDisplay()  // Full welcome sequence, ESP ready immediately
+            log("ESP display initialized and ready for translations")
         }
         
         espServer.onClientDisconnected = {
