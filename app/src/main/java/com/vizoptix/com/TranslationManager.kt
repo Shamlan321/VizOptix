@@ -43,8 +43,7 @@ class TranslationManager(
 
         sonioxClient.onConnected = {
             try {
-                log("SonioxClient.onConnected callback triggered - starting ESP preparation")
-                prepareEspForTranslation()
+                log("SonioxClient.onConnected callback triggered - ESP already initialized and ready")
                 log("SonioxClient.onConnected callback completed successfully")
             } catch (e: Exception) {
                 log("ERROR: Exception in onConnected callback: ${e.message}")
