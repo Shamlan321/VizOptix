@@ -91,29 +91,45 @@ class SonioxClient(private val apiKey: String) {
 
             if (response.has("tokens")) {
                 val tokens = response.getAsJsonArray("tokens")
+                Log.d("SonioxClient", ">>> PARSING ${tokens.size()} TOKENS <<<")
+                
                 val finalTokens = StringBuilder()
                 val nonFinalTokens = StringBuilder()
 
                 tokens.forEach { tokenElement ->
                     val token = tokenElement.asJsonObject
-                    if (token.get("translation_status").asString == "translation") {
-                        val textContent = token.get("text").asString
-                        if (token.get("is_final").asBoolean) {
+                    val translationStatus = token.get("translation_status")?.asString ?: "none"
+                    val isFinal = token.get("is_final")?.asBoolean ?: false
+                    val textContent = token.get("text")?.asString ?: ""
+                    
+                    Log.d("SonioxClient", "TOKEN: text='$textContent', translation_status='$translationStatus', is_final=$isFinal")
+                    
+                    if (translationStatus == "translation") {
+                        Log.d("SonioxClient", "✓ TRANSLATION TOKEN FOUND: '$textContent' (isFinal=$isFinal)")
+                        if (isFinal) {
                             finalTokens.append(textContent)
                         } else {
                             nonFinalTokens.append(textContent)
                         }
+                    } else {
+                        Log.d("SonioxClient", "✗ Skipping non-translation token (status=$translationStatus)")
                     }
                 }
 
                 if (nonFinalTokens.isNotEmpty()) {
-                    onTranscription?.invoke(nonFinalTokens.toString(), false)
+                    val text = nonFinalTokens.toString()
+                    Log.d("SonioxClient", ">>> INVOKING CALLBACK: NON-FINAL TEXT='$text' <<<")
+                    onTranscription?.invoke(text, false)
                 } else if (finalTokens.isNotEmpty()) {
-                    onTranscription?.invoke(finalTokens.toString(), true)
+                    val text = finalTokens.toString()
+                    Log.d("SonioxClient", ">>> INVOKING CALLBACK: FINAL TEXT='$text' <<<")
+                    onTranscription?.invoke(text, true)
+                } else {
+                    Log.d("SonioxClient", "No translation tokens to send (all tokens were original or other status)")
                 }
             }
         } catch (e: Exception) {
-            Log.e("SonioxClient", "Parse error: ${e.message}")
+            Log.e("SonioxClient", "Parse error: ${e.message}", e)
         }
     }
 

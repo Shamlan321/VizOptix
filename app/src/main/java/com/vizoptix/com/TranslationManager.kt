@@ -2,34 +2,23 @@ package com.vizoptix.com
 
 import android.util.Log
 import java.util.LinkedList
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.launch
 
 class TranslationManager(
     private val espServer: ESPServer,
     private val audioRecorder: AudioRecorder,
-    private val sonioxClient: SonioxClient
+    private val sonioxClient: SonioxClient,
+    private val displayManager: DisplayManager
 ) {
-    // Terminal display logic ported from Python
-    private val displayWidth = 160
-    private val displayHeight = 80
-    private val leftMargin = 3
-    private val topMargin = 2
-    private val lineSpacing = 10
-    
-    private val textWidth = displayWidth - (leftMargin * 2)
-    private val charWidth = 6
-    private val charsPerLine = textWidth / charWidth
-    private val maxLines = (displayHeight - (topMargin * 2)) / lineSpacing
-    
-    private var currentLine = 0
-    private val textBuffer = LinkedList<String>()
-    
-    private val textColor = 0x07E0 // Green
-    private val bgColor = 0x0000   // Black
 
-    private var isSonioxReady = false
+    var onEspStatusChanged: ((Boolean, String) -> Unit)? = null
 
     init {
         setupCallbacks()
+        // Forward display logs
+        displayManager.onLog = { msg -> log(msg) }
     }
 
     private fun setupCallbacks() {
@@ -43,8 +32,8 @@ class TranslationManager(
 
         sonioxClient.onConnected = {
             try {
-                log("SonioxClient.onConnected callback triggered - ESP already initialized and ready")
-                log("SonioxClient.onConnected callback completed successfully")
+                log("SonioxClient.onConnected callback triggered")
+                log("Soniox connected successfully")
             } catch (e: Exception) {
                 log("ERROR: Exception in onConnected callback: ${e.message}")
                 Log.e("TranslationManager", "Exception in onConnected callback", e)
@@ -53,35 +42,30 @@ class TranslationManager(
 
         sonioxClient.onDisconnected = {
             log("SonioxClient.onDisconnected triggered")
-            // Continue recording for debugging/analysis
+            log("Soniox disconnected - Audio recorder remains active")
         }
 
         sonioxClient.onError = { error ->
             log("SonioxClient.onError triggered: $error")
-            displayTextOnEsp("Error: $error")
+            displayManager.displayText("Error: $error")
         }
 
         sonioxClient.onTranscription = { text, isFinal ->
             log("SonioxClient.onTranscription triggered: text='$text', isFinal=$isFinal")
-            if (isFinal) {
-                log("Soniox: Processing final transcription: '$text'")
-                displayTextOnEsp(text)
-            } else {
-                log("Soniox: Ignoring non-final transcription: '$text'")
-                // Optional: Show non-final text on ESP? Python code only shows final.
-                // But Python code prints non-final to console.
-                // We will stick to final for ESP to avoid flickering, as per Python logic.
-            }
+            log("Soniox: Processing transcription (isFinal=$isFinal): '$text'")
+            displayManager.displayText(text)
         }
         
         espServer.onClientConnected = { ip ->
-            log("ESP Connected: $ip")
-            initializeEspDisplay()  // Full welcome sequence, ESP ready immediately
+            log("ESP Connected callback received in TranslationManager: $ip")
+            onEspStatusChanged?.invoke(true, ip)
+            displayManager.initializeDisplay()
             log("ESP display initialized and ready for translations")
         }
         
         espServer.onClientDisconnected = {
-            log("ESP Disconnected")
+            log("ESP Disconnected callback received in TranslationManager")
+            onEspStatusChanged?.invoke(false, "")
         }
     }
 
@@ -93,6 +77,7 @@ class TranslationManager(
     fun startTranslation() {
         log("Starting translation session...")
         audioRecorder.start()
+        log("Audio recorder started immediately")
         sonioxClient.connect()
     }
 
@@ -102,106 +87,8 @@ class TranslationManager(
         espServer.stop()
     }
 
-    private fun initializeEspDisplay() {
-        log("initializeEspDisplay() called - showing Python-matching welcome sequence")
-
-        // Match Python's WiFiTerminalDisplay._initialize_display()
-        espServer.clear(bgColor)
-        espServer.text(leftMargin, topMargin, "Translation Ready!", 1, textColor)
-        espServer.text(leftMargin, topMargin + 12, "25x7 Text", 1, textColor)  // Cyan color in Python
-        espServer.text(leftMargin, topMargin + 24, "WiFi Connected", 1, textColor)  // Yellow in Python
-
-        Thread.sleep(2000)  // Match Python's 2-second delay
-        espServer.clear(bgColor)
-        currentLine = 0
-        textBuffer.clear()
-        log("initializeEspDisplay() completed - ESP ready for translation text")
-    }
-
-    
-    private fun displayTextOnEsp(text: String) {
-        log("displayTextOnEsp() called with text: '$text'")
-        val wrappedLines = wrapText(text)
-
-        for (line in wrappedLines) {
-            log("Processing line: '$line'")
-            textBuffer.add(line)
-
-            // Keep buffer manageable
-            if (textBuffer.size > maxLines * 3) {
-                textBuffer.removeFirst()
-            }
-
-            if (currentLine >= maxLines) {
-                log("Text buffer full, scrolling up")
-                scrollUp()
-            }
-
-            val yPos = topMargin + (currentLine * lineSpacing)
-            log("Sending TEXT command for line $currentLine: '$line' at position ($leftMargin, $yPos)")
-            espServer.text(leftMargin, yPos, line, 1, textColor)
-            currentLine++
-        }
-        log("displayTextOnEsp() completed for text: '$text'")
-    }
-
-    private fun wrapText(text: String): List<String> {
-        if (text.length <= charsPerLine) return listOf(text)
-        
-        val wrappedLines = mutableListOf<String>()
-        val words = text.split(" ")
-        var currentLineText = ""
-        
-        for (word in words) {
-            if (word.length > charsPerLine) {
-                if (currentLineText.isNotEmpty()) {
-                    wrappedLines.add(currentLineText.trim())
-                    currentLineText = ""
-                }
-                var w = word
-                while (w.length > charsPerLine) {
-                    wrappedLines.add(w.substring(0, charsPerLine))
-                    w = w.substring(charsPerLine)
-                }
-                if (w.isNotEmpty()) {
-                    currentLineText = "$w "
-                }
-            } else {
-                val testLine = "$currentLineText$word "
-                if (testLine.length > charsPerLine) {
-                    if (currentLineText.isNotEmpty()) {
-                        wrappedLines.add(currentLineText.trim())
-                    }
-                    currentLineText = "$word "
-                } else {
-                    currentLineText = testLine
-                }
-            }
-        }
-        
-        if (currentLineText.isNotEmpty()) {
-            wrappedLines.add(currentLineText.trim())
-        }
-        
-        return wrappedLines
-    }
-
-    private fun scrollUp() {
-        espServer.clear(bgColor)
-        val visibleLines = textBuffer.takeLast(maxLines)
-        
-        visibleLines.forEachIndexed { index, line ->
-            val yPos = topMargin + (index * lineSpacing)
-            espServer.text(leftMargin, yPos, line, 1, textColor)
-        }
-        
-        currentLine = visibleLines.size
-        // Show scroll indicator
-        espServer.text(displayWidth - 18, topMargin, "^^^", 1, textColor)
-    }
-    
     private fun log(msg: String) {
         Log.d("TranslationManager", msg)
-        // In a real app, we'd expose this via Flow/LiveData to UI
+        espServer.onLog?.invoke("TM: $msg")
     }
 }

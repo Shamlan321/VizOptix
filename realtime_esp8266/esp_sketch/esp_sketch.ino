@@ -1,4 +1,4 @@
-#include <ESP8266WiFi.h>
+#include <WiFi.h>
 #include <TFT_eSPI.h>
 
 // WiFi credentials - modify these for your network
