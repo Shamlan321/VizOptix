@@ -1,47 +1,56 @@
 package com.vizoptix.com
 
 import android.util.Log
-import java.util.LinkedList
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.launch
 
 class DisplayManager(private val espServer: ESPServer) {
     
-    // Terminal display configuration
+    // Terminal display configuration - must match ESP32 sketch defines
     private val displayWidth = 160
     private val displayHeight = 80
-    private val leftMargin = 3
-    private val topMargin = 2
-    private val lineSpacing = 10
-    
-    private val textWidth = displayWidth - (leftMargin * 2)
+    private val lineHeight = 8  // pixels for textSize=1
     private val charWidth = 6
-    private val charsPerLine = textWidth / charWidth
-    private val maxLines = (displayHeight - (topMargin * 2)) / lineSpacing
     
-    private var currentLine = 0
-    private val textBuffer = LinkedList<String>()
+    // How many lines to keep EMPTY at the bottom so the newest line
+    // sits visually above the edge of the screen (easier to read)
+    private val bottomMarginLines = 2
     
-    private val textColor = 0x07E0 // Green
-    private val bgColor = 0x0000   // Black
+    // Total addressable lines on screen
+    private val totalLines = displayHeight / lineHeight          // 10
+    // Lines we actually write into (remaining after bottom margin)
+    private val usableLines = totalLines - bottomMarginLines     // 8
+    private val charsPerLine = displayWidth / charWidth          // 26
+    
+    // Color scheme
+    private val textColor = 0x07E0   // Green
+    private val bgColor = 0x0000     // Black
+    private val accentColor = 0x07FF // Cyan
+    private val fontType = 1
 
     var onLog: ((String) -> Unit)? = null
 
     fun initializeDisplay() {
-        log("initializeDisplay() called - showing welcome sequence")
+        log("initializeDisplay() called - showing welcome sequence with TEXTMODE")
 
         // Match Python's WiFiTerminalDisplay._initialize_display()
-        espServer.clear(bgColor)
-        espServer.text(leftMargin, topMargin, "VizOptix Ready!", 1, textColor)
-        espServer.text(leftMargin, topMargin + 12, "Waiting...", 1, textColor)
+        // Send TEXTMODE command to set colors and font
+        espServer.textMode(textColor, bgColor, fontType)
         
-        // Wait 2 seconds then clear screen
-        log("Waiting 2 seconds before clearing screen...")
+        // Send welcome lines using ADDLINE (hardware scroll)
+        espServer.addLine("Translation Ready")
+        espServer.addLine("WiFi Connected")
+        
+        // Wait 1.5 seconds then reinitialize to clear welcome messages
+        log("Waiting 1.5 seconds before clearing screen...")
         GlobalScope.launch(Dispatchers.IO) {
             try {
-                Thread.sleep(2000)
-                clearScreen()
+                Thread.sleep(1500)
+                // Reinitialize to clear welcome messages before real use
+                espServer.textMode(textColor, bgColor, fontType)
+                Thread.sleep(200)
+                log("WiFiTerminalDisplay ready.")
             } catch (e: Exception) {
                 log("Error in delayed clear: ${e.message}")
             }
@@ -49,67 +58,67 @@ class DisplayManager(private val espServer: ESPServer) {
     }
     
     fun clearScreen() {
-        log("Clearing ESP screen and resetting buffer")
-        espServer.clear(bgColor)
-        currentLine = 0
-        textBuffer.clear()
+        log("Clearing display via TEXTMODE")
+        espServer.textMode(textColor, bgColor, fontType)
     }
 
     fun displayText(text: String) {
         log(">>> DISPLAY TEXT: '$text' <<<")
         if (text.isBlank()) return
 
+        // Word-wrap text and send each line as ADDLINE (hardware scrolling)
         val wrappedLines = wrapText(text)
         
         for (line in wrappedLines) {
-            textBuffer.add(line)
+            espServer.addLine(line)
+        }
 
-            // Keep buffer manageable
-            if (textBuffer.size > maxLines * 3) {
-                textBuffer.removeFirst()
-            }
-
-            if (currentLine >= maxLines) {
-                scrollUp()
-            }
-
-            val yPos = topMargin + (currentLine * lineSpacing)
-            espServer.text(leftMargin, yPos, line, 1, textColor)
-            currentLine++
+        // After the real content, push bottomMarginLines blank lines
+        // so the text always sits in the upper portion of the screen and
+        // the bottom margin stays clear.
+        // The ESP hardware scroll handles the visual movement.
+        repeat(bottomMarginLines) {
+            espServer.addLine("")
         }
     }
 
     private fun wrapText(text: String): List<String> {
-        if (text.length <= charsPerLine) return listOf(text)
+        val limit = charsPerLine
+        if (text.length <= limit) return listOf(text)
         
         val wrappedLines = mutableListOf<String>()
-        val words = text.split(" ")
         var currentLineText = ""
         
-        for (word in words) {
-            if (word.length > charsPerLine) {
-                if (currentLineText.isNotEmpty()) {
-                    wrappedLines.add(currentLineText.trim())
+        for (word in text.split(" ")) {
+            // Long word that must be split
+            var remainingWord = word
+            while (remainingWord.length > limit) {
+                val spaceLeft = limit - currentLineText.length
+                if (spaceLeft > 1) {
+                    wrappedLines.add((currentLineText + remainingWord.substring(0, spaceLeft)).trim())
+                    remainingWord = remainingWord.substring(spaceLeft)
                     currentLineText = ""
-                }
-                var w = word
-                while (w.length > charsPerLine) {
-                    wrappedLines.add(w.substring(0, charsPerLine))
-                    w = w.substring(charsPerLine)
-                }
-                if (w.isNotEmpty()) {
-                    currentLineText = "$w "
-                }
-            } else {
-                val testLine = "$currentLineText$word "
-                if (testLine.length > charsPerLine) {
+                } else {
                     if (currentLineText.isNotEmpty()) {
                         wrappedLines.add(currentLineText.trim())
                     }
-                    currentLineText = "$word "
-                } else {
-                    currentLineText = testLine
+                    currentLineText = ""
                 }
+            }
+            
+            val candidate = if (currentLineText.isNotEmpty()) {
+                "$currentLineText $remainingWord".trimStart()
+            } else {
+                remainingWord
+            }
+            
+            if (candidate.length <= limit) {
+                currentLineText = candidate
+            } else {
+                if (currentLineText.isNotEmpty()) {
+                    wrappedLines.add(currentLineText.trim())
+                }
+                currentLineText = remainingWord
             }
         }
         
@@ -118,20 +127,6 @@ class DisplayManager(private val espServer: ESPServer) {
         }
         
         return wrappedLines
-    }
-
-    private fun scrollUp() {
-        espServer.clear(bgColor)
-        val visibleLines = textBuffer.takeLast(maxLines)
-        
-        visibleLines.forEachIndexed { index, line ->
-            val yPos = topMargin + (index * lineSpacing)
-            espServer.text(leftMargin, yPos, line, 1, textColor)
-        }
-        
-        currentLine = visibleLines.size
-        // Show scroll indicator
-        espServer.text(displayWidth - 18, topMargin, "^^^", 1, textColor)
     }
     
     private fun log(msg: String) {

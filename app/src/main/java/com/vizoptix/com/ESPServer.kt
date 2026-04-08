@@ -178,6 +178,19 @@ class ESPServer(private val port: Int = 8888) {
         sendCommand("SETFONT:$fontType")
     }
 
+    fun textMode(textColor: Int = 0x07E0, bgColor: Int = 0x0000, textSize: Int = 1) {
+        sendCommand("TEXTMODE:$textColor,$bgColor,$textSize")
+    }
+
+    fun addLine(text: String) {
+        val sanitizedText = text.replace("\n", " ").replace("\r", " ")
+        sendCommand("ADDLINE:$sanitizedText")
+    }
+
+    fun setColor(textColor: Int, bgColor: Int = 0x0000) {
+        sendCommand("SETCOLOR:$textColor,$bgColor")
+    }
+
     private fun disconnectClient() {
         if (isConnected.getAndSet(false)) {
             try {
